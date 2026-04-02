@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://luna5813.github.io/cherry-blossom-map/sitemap.xml
