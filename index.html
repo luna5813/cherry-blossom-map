@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>서울 벚꽃 명소 지도 | 실시간 명당 위치 확인</title>
+    <meta name="description" content="서울 벚꽃 명소 위치를 지도에서 확인하세요. 사용자 제보 기반 실시간 명당 지도, 주차장과 카페 위치까지 한눈에 확인 가능합니다.">
+    <meta name="robots" content="index, follow">
+    <link rel="canonical" href="https://luna5813.github.io/cherry-blossom-map/">
+    <meta property="og:title" content="서울 벚꽃 명소 지도">
+    <meta property="og:description" content="실시간 명당 위치 확인 지도 | 주차장과 카페 정보 제공">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://luna5813.github.io/cherry-blossom-map/">
+    <meta property="og:image" content="https://luna5813.github.io/cherry-blossom-map/images/og-image.png">
+
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-2QF8M7WFVJ"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-2QF8M7WFVJ');
+    </script>
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+
+    <style>
+        html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; font-family: sans-serif; }
+        #map { width: 100vw; height: 100vh; z-index: 1; }
+        .header {
+            position: absolute; top: 0; left: 0; right: 0;
+            background: rgba(255, 182, 193, 0.92);
+            color: #5a1a2a; padding: 6px 0; text-align: center;
+            z-index: 1001; border-bottom: 1px solid rgba(220,100,130,0.5);
+        }
+        .header h1 { margin: 0; font-size: 14px; font-weight: 600; }
+        .control-panel { position: fixed; top: 45px; right: 12px; z-index: 1000; }
+        .add-btn {
+            padding: 8px 16px; background: #e75480;
+            color: white; border: none; border-radius: 20px;
+            cursor: pointer; font-weight: bold; font-size: 13px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        }
+        .add-btn.active { background: #2ecc71; animation: pulse 1s infinite; }
+        @keyframes pulse { 0%{transform:scale(1);} 50%{transform:scale(1.05);} 100%{transform:scale(1);} }
+        .legend {
+            position: fixed; bottom: 20px; left: 12px;
+            background: rgba(255,255,255,0.95); padding: 10px;
+            border-radius: 10px; z-index: 1000; font-size: 11px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1); border: 1px solid #eee; line-height: 1.8;
+        }
+        .status-badge { display:inline-block; padding:1px 4px; border-radius:3px; font-size:9px; color:white; font-weight:bold; margin-left:5px; }
+        .pending-tag { background: #95a5a6; }
+        .verified-tag { background: #e75480; }
+        .vote-btn-group { display:flex; gap:5px; margin-top:10px; }
+        .up-btn { flex:1; background:#e75480; color:white; border:none; padding:6px; border-radius:4px; font-size:11px; cursor:pointer; }
+        .down-btn { flex:1; background:#e74c3c; color:white; border:none; padding:6px; border-radius:4px; font-size:11px; cursor:pointer; }
+        .popup-form { min-width: 170px; }
+        .popup-form input, .popup-form textarea, .popup-form select {
+            width:100%; margin-bottom:6px; padding:8px;
+            border-radius:4px; border:1px solid #ddd; font-size:13px; box-sizing:border-box;
+        }
+        .save-btn { width:100%; padding:10px; background:#e75480; color:white; border:none; border-radius:4px; font-weight:bold; cursor:pointer; }
+    </style>
+</head>
+<body>
+
+<div class="header"><h1>🌸 2026 서울 벚꽃 명소 지도</h1></div>
+<div id="map"></div>
+<div class="control-panel">
+    <button id="addBtn" class="add-btn" onclick="toggleAddMode()">📍 명당 제보</button>
+</div>
+<div class="legend">
+    🌸 벚꽃 명소 (인증) | 🌸 확인 중 (흐림)<br>
+    🅿️ 주차장 | ☕ 카페
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    firebase.initializeApp({
+        databaseURL: "https://fireworks-map-50c05-default-rtdb.firebaseio.com/"
+    });
+    const database = firebase.database();
+
+    const map = L.map('map', { zoomControl: false }).setView([37.528, 126.940], 14);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+    const facilities = [
+        { name: "여의도 공영주차장 1", lat: 37.5330, lng: 126.9280, type: "🅿️" },
+        { name: "여의도 공영주차장 2", lat: 37.5255, lng: 126.9355, type: "🅿️" },
+        { name: "스타벅스 여의도한강공원점", lat: 37.5290, lng: 126.9320, type: "☕" },
+        { name: "이디야 여의도역점", lat: 37.5215, lng: 126.9243, type: "☕" },
+        { name: "뚝섬 공영주차장", lat: 37.5305, lng: 127.0730, type: "🅿️" },
+        { name: "석촌호수 근처 카페거리", lat: 37.5055, lng: 127.1005, type: "☕" },
+    ];
+    facilities.forEach(f => {
+        L.marker([f.lat, f.lng], {
+            icon: L.divIcon({ html: `<div style="font-size:18px;">${f.type}</div>`, className:'', iconSize:[24,24], iconAnchor:[12,12] })
+        }).bindPopup(`<b>${f.name}</b>`).addTo(map);
+    });
+
+    const defaultSpots = [
+        { id:"cherry_def1", name:"여의도 윤중로", lat:37.5285, lng:126.9330, status:"혼잡", reason:"서울 최대 벚꽃 터널. 매년 인파 몰림, 주중 이른 아침 추천", upvotes:99, verified:true },
+        { id:"cherry_def2", name:"석촌호수 벚꽃길", lat:37.5058, lng:127.1008, status:"보통", reason:"호수 반영과 벚꽃이 어우러지는 포토스팟. 롯데월드타워 배경", upvotes:99, verified:true },
+        { id:"cherry_def3", name:"남산 순환로", lat:37.5510, lng:126.9882, status:"보통", reason:"도심 속 조용한 벚꽃길. 케이블카와 함께 즐기기 좋음", upvotes:99, verified:true },
+        { id:"cherry_def4", name:"뚝섬한강공원 벚꽃길", lat:37.5307, lng:127.0732, status:"쾌적", reason:"한강변 따라 이어지는 벚꽃. 피크닉 명당", upvotes:99, verified:true },
+        { id:"cherry_def5", name:"경의선숲길 (연남동)", lat:37.5638, lng:126.9271, status:"보통", reason:"도심 속 선형공원. 벚꽃+카페 조합 최고", upvotes:99, verified:true },
+    ];
+
+    const markers = {};
+
+    function renderSpot(data, key) {
+        if (data.reports && data.reports >= 1) {
+            if (markers[key]) map.removeLayer(markers[key]);
+            return;
+        }
+        const isVerified = data.verified || (data.upvotes >= 3);
+        const opacity = isVerified ? 1.0 : 0.45;
+        const color = isVerified ? "#e75480" : "#95a5a6";
+        const tag = isVerified
+            ? '<span class="status-badge verified-tag">인증됨</span>'
+            : '<span class="status-badge pending-tag">확인 중</span>';
+
+        const icon = L.divIcon({
+            html: `<div style="background:${color};width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:white;border:2px solid white;font-size:13px;opacity:${opacity};box-shadow:0 2px 5px rgba(0,0,0,0.2);">🌸</div>`,
+            className:'', iconSize:[26,26], iconAnchor:[13,13]
+        });
+
+        const popupContent = `
+            <div class="popup-form">
+                <strong>${data.name}</strong> ${tag}<br>
+                <div style="font-size:12px;color:#666;margin-top:3px;">혼잡도: ${data.status}</div>
+                <p style="font-size:12px;margin:8px 0;">${data.reason}</p>
+                <div style="font-size:11px;color:#e75480;">🌸 추천: ${data.upvotes||0}</div>
+                ${!data.verified ? `
+                <div class="vote-btn-group">
+                    <button class="up-btn" onclick="handleVote('${key}','up')">👍 맞아요</button>
+                    <button class="down-btn" onclick="handleVote('${key}','down')">⚠️ 신고</button>
+                </div>` : ''}
+            </div>`;
+
+        if (markers[key]) {
+            markers[key].setLatLng([data.lat, data.lng]).setIcon(icon).setPopupContent(popupContent);
+        } else {
+            markers[key] = L.marker([data.lat, data.lng], {icon}).bindPopup(popupContent).addTo(map);
+        }
+    }
+
+    defaultSpots.forEach(spot => renderSpot(spot, spot.id));
+
+    database.ref('cherry_spots').on('value', (snapshot) => {
+        const val = snapshot.val();
+        for (let key in val) renderSpot(val[key], key);
+    });
+
+    window.handleVote = function(key, type) {
+        gtag('event', 'cherry_vote_interaction', {'vote_type': type});
+        database.ref(`cherry_spots/${key}`).transaction((current) => {
+            if (current) {
+                if (type === 'up') {
+                    current.upvotes = (current.upvotes||0) + 1;
+                    if (current.upvotes >= 3) current.verified = true;
+                } else {
+                    current.reports = (current.reports||0) + 1;
+                }
+            }
+            return current;
+        });
+    };
+
+    let isAddMode = false;
+    function toggleAddMode() {
+        isAddMode = !isAddMode;
+        if (isAddMode) gtag('event', 'cherry_click_add_start');
+        const btn = document.getElementById('addBtn');
+        btn.innerText = isAddMode ? "지도 터치" : "📍 명당 제보";
+        btn.classList.toggle('active');
+    }
+
+    map.on('click', function(e) {
+        if (!isAddMode) return;
+        const id = Date.now();
+        const content = `
+            <div class="popup-form">
+                <input type="text" id="name_${id}" placeholder="장소 이름">
+                <textarea id="reason_${id}" placeholder="추천 이유 (예: 벚꽃 터널이 아름다워요)" rows="2"></textarea>
+                <select id="status_${id}">
+                    <option value="쾌적">🟢 쾌적</option>
+                    <option value="보통" selected>🟡 보통</option>
+                    <option value="혼잡">🔴 혼잡</option>
+                </select>
+                <button class="save-btn" onclick="saveToFirebase(${e.latlng.lat},${e.latlng.lng},${id})">등록</button>
+            </div>`;
+        L.popup().setLatLng(e.latlng).setContent(content).openOn(map);
+        toggleAddMode();
+    });
+
+    window.saveToFirebase = function(lat, lng, id) {
+        const name = document.getElementById(`name_${id}`).value;
+        const reason = document.getElementById(`reason_${id}`).value;
+        const status = document.getElementById(`status_${id}`).value;
+        if (name && reason) {
+            database.ref('cherry_spots').push({name, reason, status, lat, lng, upvotes:0, reports:0, verified:false})
+            .then(() => {
+                gtag('event', 'cherry_complete_registration', {'spot_name': name});
+                map.closePopup();
+            });
+        }
+    };
+</script>
+</body>
+</html>
